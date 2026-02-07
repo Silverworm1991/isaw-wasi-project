@@ -10,3 +10,8 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQL8Dialect
+
+# JWT Configuration
+jwt:
+  secret: ${JWT_SECRET:myVerySecretKeyThatShouldBeAtLeast256BitsLongForHS256Algorithm}
+  expiration: ${JWT_EXPIRATION:86400000} # 24 hours in milliseconds

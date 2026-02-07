@@ -11,30 +11,50 @@ import org.example.katalog.service.ItemService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 @RestController
 @RequestMapping("/items")
-public class ItemController {
+public class ItemResource {
 
   private final ItemService itemService;
 
   @Autowired
-  public ItemController(ItemService itemService) {
+  public ItemResource(ItemService itemService) {
     this.itemService = itemService;
+  }
+
+  private String getAuthenticatedUsername() {
+    Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+    return authentication.getName();
   }
 
   @GetMapping
   public List<Item> getAllItems(@RequestParam(required = false) String username) {
+    String currentUser = getAuthenticatedUsername();
+
+    // If username parameter is provided, check authorization
     if (username != null && !username.isEmpty()) {
+      // Users can only see their own items (or implement admin role check here)
+      if (!username.equals(currentUser)) {
+        throw new RuntimeException("You can only view your own items");
+      }
       return itemService.findByUsername(username);
     }
-    return itemService.findAll();
+
+    // Return only current user's items by default
+    return itemService.findByUsername(currentUser);
   }
 
   @PostMapping
   public ResponseEntity<Item> createItem(@Valid @RequestBody Item item) {
+    // Set username from authenticated user (ignore any username in request body)
+    String authenticatedUsername = getAuthenticatedUsername();
+    item.setUsername(authenticatedUsername);
+
     Item saved = itemService.save(item);
     URI location =
         ServletUriComponentsBuilder.fromCurrentRequest()
@@ -46,14 +66,24 @@ public class ItemController {
 
   @GetMapping("/{id}")
   public ResponseEntity<Item> getItemById(@PathVariable Long id) {
+    String currentUser = getAuthenticatedUsername();
+
     return itemService
         .findById(id)
-        .map(ResponseEntity::ok)
+        .map(
+            item -> {
+              // Verify user owns this item
+              if (!item.getUsername().equals(currentUser)) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).<Item>build();
+              }
+              return ResponseEntity.ok(item);
+            })
         .orElse(ResponseEntity.notFound().build());
   }
 
   @PutMapping("/{id}")
   public ResponseEntity<?> updateItem(@PathVariable Long id, @Valid @RequestBody Item updatedItem) {
+    String currentUser = getAuthenticatedUsername();
     Optional<Item> optionalItem = itemService.findById(id);
 
     if (optionalItem.isEmpty()) {
@@ -61,6 +91,11 @@ public class ItemController {
     }
 
     Item existingItem = optionalItem.get();
+
+    // Verify user owns this item
+    if (!existingItem.getUsername().equals(currentUser)) {
+      return ResponseEntity.status(HttpStatus.FORBIDDEN).body("You can only update your own items");
+    }
 
     // Type check FIRST — before mutating anything
     if (!existingItem.getClass().equals(updatedItem.getClass())) {
@@ -77,6 +112,7 @@ public class ItemController {
     existingItem.setTitle(updatedItem.getTitle());
     existingItem.setYear(updatedItem.getYear());
     existingItem.setGenre(updatedItem.getGenre());
+    // Username should NOT be updated - keep original owner
 
     // Update subclass-specific fields
     if (existingItem instanceof Movie existingMovie && updatedItem instanceof Movie updatedMovie) {
@@ -100,6 +136,18 @@ public class ItemController {
 
   @DeleteMapping("/{id}")
   public ResponseEntity<Void> deleteItem(@PathVariable Long id) {
+    String currentUser = getAuthenticatedUsername();
+
+    Optional<Item> item = itemService.findById(id);
+    if (item.isEmpty()) {
+      return ResponseEntity.notFound().build();
+    }
+
+    // Verify user owns this item
+    if (!item.get().getUsername().equals(currentUser)) {
+      return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+    }
+
     boolean deleted = itemService.deleteById(id);
     return deleted ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
   }
