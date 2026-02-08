@@ -26,7 +26,7 @@ public class AuthService {
 
   public AuthResponseDTO register(RegisterRequestDTO request) {
     // Check if username already exists
-    if (userRepository.existByUsername(request.getUsername())) {
+    if (userRepository.existsByUsername(request.getUsername())) {
       throw new RuntimeException("Username already taken");
     }
 
